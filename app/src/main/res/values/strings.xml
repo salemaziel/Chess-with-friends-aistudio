@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">Chess With Friends</string>
+    <string name="hero_banner_desc">Grandmaster tournament chess board banner</string>
+    <string name="section_your_turn">Your Turn</string>
+    <string name="section_awaiting_opponent">Awaiting Opponent</string>
+    <string name="section_archived_games">Archived &amp; Past Games</string>
+    <string name="beginner_mode_label">Beginner Mode</string>
+    <string name="find_friends_label">Find Friends &amp; Invites</string>
+    <string name="sql_schema_label">Supabase SQL &amp; RLS</string>
+    <string name="new_match_label">New Match</string>
+    <string name="resign_label">Resign</string>
+    <string name="offer_draw_label">Offer Draw</string>
+    <string name="flip_board_label">Flip Board</string>
+</resources>

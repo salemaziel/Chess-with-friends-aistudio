@@ -1,0 +1,6 @@
+{
+  "name": "Chess With Friends",
+  "description": "Real-time and asynchronous multiplayer chess powered by Supabase and a custom 2D Jetpack Compose Canvas board with interactive Beginner Mode guidance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
