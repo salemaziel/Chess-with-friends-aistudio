@@ -1,22 +1,29 @@
 package com.example.ui.screens
 
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -26,6 +33,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Link
@@ -45,7 +53,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -54,7 +61,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
@@ -109,6 +115,103 @@ import com.example.ui.theme.TextSecondary
 import kotlin.math.abs
 
 /**
+ * In-window bottom sheet overlay that renders inside the main Activity window (no separate Android
+ * Dialog window), preventing Material3 ModalBottomSheet scrim/focus deadlocks, nested scroll locks,
+ * and DecorView FloatingActionMode crashes.
+ */
+@Composable
+fun GrandmasterSheetOverlay(
+    onDismiss: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    BackHandler(onBack = onDismiss)
+    val sheetFocusManager = LocalFocusManager.current
+    val safeSheetToolbar = remember { SafeComposeTextToolbar() }
+    DisposableEffect(Unit) {
+        onDispose { sheetFocusManager.clearFocus(force = true) }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.72f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss
+            )
+            .statusBarsPadding()
+            .padding(top = 36.dp)
+            .imePadding(),
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Surface(
+            color = SurfaceCard,
+            contentColor = TextPrimary,
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 600.dp)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {}
+                )
+                .border(
+                    width = 1.dp,
+                    color = SurfaceBorder,
+                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                )
+        ) {
+            CompositionLocalProvider(LocalTextToolbar provides safeSheetToolbar) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp, bottom = 2.dp, start = 16.dp, end = 8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .width(38.dp)
+                                .height(4.dp)
+                                .clip(CircleShape)
+                                .background(SurfaceBorder)
+                        )
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .size(36.dp)
+                                .testTag("sheet_close_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false)
+                    ) {
+                        content()
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
  * 1. NEW MATCH & PLAYER SELECTION MODAL SHEET
  * Supports AI Opponent (4 Difficulty Levels), Online Match (Friend selection, @username invite,
  * Share Link, or QR Code), and Local Pass & Play.
@@ -139,7 +242,6 @@ fun NewMatchSetupSheet(
     ) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
 
@@ -168,18 +270,8 @@ fun NewMatchSetupSheet(
         "https://chesswithfriends.app/join/$personalInviteCode?host=${currentUser.username}&tc=${selectedTimeControl.shortBadge}"
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = SurfaceCard,
-        contentColor = TextPrimary
-    ) {
-        val sheetFocusManager = LocalFocusManager.current
-        val safeSheetToolbar = remember { SafeComposeTextToolbar() }
-        DisposableEffect(Unit) {
-            onDispose { sheetFocusManager.clearFocus(force = true) }
-        }
-        CompositionLocalProvider(LocalTextToolbar provides safeSheetToolbar) {
+    GrandmasterSheetOverlay(onDismiss = onDismiss) {
+        Box {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -713,7 +805,6 @@ fun FriendSearchDrawerSheet(
     onChallengeFriend: (UserProfileDto) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
 
@@ -732,18 +823,8 @@ fun FriendSearchDrawerSheet(
         "https://chesswithfriends.app/join/$personalInviteCode?host=${currentUser.username}"
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = SurfaceCard,
-        contentColor = TextPrimary
-    ) {
-        val sheetFocusManager = LocalFocusManager.current
-        val safeSheetToolbar = remember { SafeComposeTextToolbar() }
-        DisposableEffect(Unit) {
-            onDispose { sheetFocusManager.clearFocus(force = true) }
-        }
-        CompositionLocalProvider(LocalTextToolbar provides safeSheetToolbar) {
+    GrandmasterSheetOverlay(onDismiss = onDismiss) {
+        Box {
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1604,27 +1685,18 @@ fun SupabaseAuthSheet(
     onOpenSqlSchema: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val clipboard = LocalClipboardManager.current
     var copiedDirectSql by remember { mutableStateOf(false) }
     var isRegisterMode by remember { mutableStateOf(false) }
     var showCredentialsConfig by remember(isSupabaseConfigured) { mutableStateOf(!isSupabaseConfigured) }
     var supabaseUrlInput by remember(activeSupabaseUrl) {
         mutableStateOf(
-            if (activeSupabaseUrl.contains("your-project-id") || activeSupabaseUrl.contains("idaipxkyknvyvptzhjge")) {
-                ""
-            } else {
-                activeSupabaseUrl
-            }
+            if (activeSupabaseUrl.contains("your-project-id")) "" else activeSupabaseUrl
         )
     }
     var supabaseKeyInput by remember(activeSupabaseAnonKey) {
         mutableStateOf(
-            if (activeSupabaseAnonKey.contains("your-supabase-anon") || activeSupabaseUrl.contains("idaipxkyknvyvptzhjge")) {
-                ""
-            } else {
-                activeSupabaseAnonKey
-            }
+            if (activeSupabaseAnonKey.contains("your-supabase-anon")) "" else activeSupabaseAnonKey
         )
     }
     var email by remember { mutableStateOf("") }
@@ -1632,18 +1704,8 @@ fun SupabaseAuthSheet(
     var username by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf("") }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = SurfaceCard,
-        contentColor = TextPrimary
-    ) {
-        val sheetFocusManager = LocalFocusManager.current
-        val safeSheetToolbar = remember { SafeComposeTextToolbar() }
-        DisposableEffect(Unit) {
-            onDispose { sheetFocusManager.clearFocus(force = true) }
-        }
-        CompositionLocalProvider(LocalTextToolbar provides safeSheetToolbar) {
+    GrandmasterSheetOverlay(onDismiss = onDismiss) {
+        Box {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1949,21 +2011,14 @@ fun SupabaseAuthSheet(
 /**
  * 4. SUPABASE POSTGRESQL SCHEMA & RLS VIEWER SHEET
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SupabaseSqlSchemaSheet(
     onDismiss: () -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = SurfaceCard,
-        contentColor = TextPrimary
-    ) {
+    GrandmasterSheetOverlay(onDismiss = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2067,8 +2122,6 @@ fun ClockSettingsSheet(
     ) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
     var clockEnabled by remember(isClockEnabled) { mutableStateOf(isClockEnabled) }
     var selectedPreset by remember(currentTimeControl) {
         mutableStateOf(
@@ -2084,18 +2137,8 @@ fun ClockSettingsSheet(
     var customInc by remember(customIncrementSeconds) { mutableIntStateOf(customIncrementSeconds.coerceIn(0, 60)) }
     var applyToActive by remember(hasActiveMatch) { mutableStateOf(hasActiveMatch) }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = SurfaceCard,
-        contentColor = TextPrimary
-    ) {
-        val sheetFocusManager = LocalFocusManager.current
-        val safeSheetToolbar = remember { SafeComposeTextToolbar() }
-        DisposableEffect(Unit) {
-            onDispose { sheetFocusManager.clearFocus(force = true) }
-        }
-        CompositionLocalProvider(LocalTextToolbar provides safeSheetToolbar) {
+    GrandmasterSheetOverlay(onDismiss = onDismiss) {
+        Box {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()

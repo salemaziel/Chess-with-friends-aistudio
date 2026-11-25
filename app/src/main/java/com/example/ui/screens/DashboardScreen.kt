@@ -444,13 +444,13 @@ private fun GrandmasterPlayerRatingCard(
                         color = TextPrimary
                     )
                 }
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(8.dp))
                 Box(
                     modifier = Modifier
-                        .size(28.dp)
-                        .clip(RoundedCornerShape(8.dp))
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(10.dp))
                         .background(SurfaceElevated)
-                        .border(1.dp, SurfaceBorder, RoundedCornerShape(8.dp))
+                        .border(1.dp, SurfaceBorder, RoundedCornerShape(10.dp))
                         .clickable { onSqlSchemaClick() }
                         .testTag("sql_schema_button"),
                     contentAlignment = Alignment.Center
@@ -458,8 +458,8 @@ private fun GrandmasterPlayerRatingCard(
                     Icon(
                         imageVector = Icons.Default.Storage,
                         contentDescription = "Supabase SQL & RLS Schema",
-                        tint = TextSecondary,
-                        modifier = Modifier.size(14.dp)
+                        tint = GoldAccentRestrained,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }

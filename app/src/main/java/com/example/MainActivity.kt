@@ -6,11 +6,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalTextToolbar
@@ -120,6 +123,7 @@ fun ChessWithFriendsApp(
         }
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Crossfade(
         targetState = uiState.activeMatch != null,
         label = "screen_navigation"
@@ -357,5 +361,6 @@ fun ChessWithFriendsApp(
                 chessViewModel.setShowClockSettingsSheet(false)
             }
         )
+    }
     }
 }

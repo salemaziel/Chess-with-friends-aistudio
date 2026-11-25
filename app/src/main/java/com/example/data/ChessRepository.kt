@@ -30,9 +30,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 class ChessRepository {
     private val repoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -62,9 +65,8 @@ class ChessRepository {
         val cleanKey = key.trim()
         if (cleanUrl.isEmpty() || cleanKey.isEmpty()) return false
         if (!cleanUrl.startsWith("https://")) return false
-        // Reject template and dummy placeholder project URLs/keys
+        // Reject only template placeholder values from .env.example
         if (cleanUrl.contains("your-project-id") ||
-            cleanUrl.contains("idaipxkyknvyvptzhjge") ||
             cleanUrl.contains("example.supabase.co") ||
             cleanKey.contains("your-supabase-anon")
         ) {
@@ -73,6 +75,7 @@ class ChessRepository {
         return cleanUrl.contains(".supabase.co") || cleanUrl.contains(".supabase.in")
     }
 
+    private val clientLock = Any()
     private var cachedClientUrl: String = ""
     private var cachedClientKey: String = ""
     private var cachedClient: SupabaseClient? = null
@@ -80,22 +83,28 @@ class ChessRepository {
         private set
 
     val supabaseClient: SupabaseClient?
-        get() {
+        get() = synchronized(clientLock) {
             val url = activeSupabaseUrl
             val key = activeSupabaseAnonKey
             if (!isValidSupabaseCredentials(url, key)) {
-                return null
+                return@synchronized null
             }
             if (cachedClient != null && cachedClientUrl == url && cachedClientKey == key) {
-                return cachedClient
+                return@synchronized cachedClient
             }
-            return try {
+            try {
                 val created = createSupabaseClient(
                     supabaseUrl = url,
                     supabaseKey = key
                 ) {
                     defaultLogLevel = LogLevel.NONE
-                    httpEngine = OkHttp.create()
+                    httpEngine = OkHttp.create {
+                        config {
+                            connectTimeout(10, TimeUnit.SECONDS)
+                            readTimeout(10, TimeUnit.SECONDS)
+                            writeTimeout(10, TimeUnit.SECONDS)
+                        }
+                    }
                     install(Auth) {
                         sessionManager = MemorySessionManager()
                         alwaysAutoRefresh = true
@@ -115,32 +124,36 @@ class ChessRepository {
         }
 
     fun configureSupabaseCredentials(url: String, anonKey: String) {
-        customSupabaseUrl = url.trim().removeSuffix("/")
-        customSupabaseKey = anonKey.trim()
-        cachedClient = null
+        synchronized(clientLock) {
+            customSupabaseUrl = url.trim().removeSuffix("/")
+            customSupabaseKey = anonKey.trim()
+            cachedClient = null
+        }
     }
 
     /**
-     * Pings the configured Supabase project and checks whether Postgrest & the `profiles` table are reachable.
+     * Pings the configured Supabase project off the Main thread and checks whether Postgrest & tables are reachable.
      */
-    suspend fun testSupabaseConnection(): Result<String> {
+    suspend fun testSupabaseConnection(): Result<String> = withContext(Dispatchers.IO) {
         val url = activeSupabaseUrl
         val key = activeSupabaseAnonKey
         if (!isValidSupabaseCredentials(url, key)) {
-            return Result.failure(
+            return@withContext Result.failure(
                 IllegalStateException(
-                    "No valid Supabase Project URL & Anon Key configured. Paste your project's URL (https://<project-ref>.supabase.co) and Anon Key below, or set SUPABASE_URL and SUPABASE_ANON_KEY in the AI Studio Secrets panel."
+                    "No valid Supabase Project URL & Anon Key configured. Set SUPABASE_URL and SUPABASE_ANON_KEY in .env / AI Studio Secrets or enter them above."
                 )
             )
         }
         val client = supabaseClient
-            ?: return Result.failure(
+            ?: return@withContext Result.failure(
                 IllegalStateException("Supabase client failed to initialize: ${lastClientInitError ?: "Unknown error"}")
             )
 
-        return try {
-            client.from("profiles").select {
-                limit(1)
+        try {
+            withTimeout(12_000L) {
+                client.from("profiles").select {
+                    limit(1)
+                }
             }
             Result.success("Connected to $url — Supabase Auth & PostgreSQL tables are live and ready!")
         } catch (e: Exception) {
@@ -158,7 +171,7 @@ class ChessRepository {
                     msg.contains("UnknownHostException", ignoreCase = true) -> {
                     Result.failure(
                         IllegalStateException(
-                            "Cannot resolve host '$url'. Verify that your Supabase Project URL is spelled correctly and that your Supabase project is active (not paused)."
+                            "Cannot resolve host '$url'. Check your internet connection and verify the Supabase project is active (not paused)."
                         )
                     )
                 }
@@ -206,25 +219,27 @@ class ChessRepository {
 
     // ------------------------ SUPABASE AUTHENTICATION ------------------------
 
-    suspend fun signInWithEmail(email: String, password: String): Result<UserProfileDto> {
+    suspend fun signInWithEmail(email: String, password: String): Result<UserProfileDto> = withContext(Dispatchers.IO) {
         val cleanEmail = email.trim()
         if (cleanEmail.isBlank() || password.isBlank()) {
-            return Result.failure(IllegalArgumentException("Please enter both your email address and password."))
+            return@withContext Result.failure(IllegalArgumentException("Please enter both your email address and password."))
         }
         val client = supabaseClient
-            ?: return Result.failure(
+            ?: return@withContext Result.failure(
                 IllegalStateException(
-                    "Supabase is not connected yet. Paste your Supabase Project URL and Anon Key in the Connection section above (or in the AI Studio Secrets panel) and tap 'Connect & Test'."
+                    "Supabase is not connected yet. Paste your Supabase Project URL and Anon Key in the Connection section above (or in .env) and tap 'Connect & Test'."
                 )
             )
 
-        return try {
-            client.auth.signInWith(Email) {
-                this.email = cleanEmail
-                this.password = password
+        try {
+            withTimeout(15_000L) {
+                client.auth.signInWith(Email) {
+                    this.email = cleanEmail
+                    this.password = password
+                }
             }
             val authUser = client.auth.currentUserOrNull()
-                ?: return Result.failure(IllegalStateException("Signed in, but Supabase session user was not returned."))
+                ?: return@withContext Result.failure(IllegalStateException("Signed in, but Supabase session user was not returned."))
             val profile = fetchOrCreateProfile(
                 userId = authUser.id,
                 fallbackUsername = cleanEmail.substringBefore("@")
@@ -243,7 +258,7 @@ class ChessRepository {
         password: String,
         username: String,
         displayName: String
-    ): Result<UserProfileDto> {
+    ): Result<UserProfileDto> = withContext(Dispatchers.IO) {
         val cleanEmail = email.trim()
         val cleanUsername = username.trim().lowercase().ifBlank {
             cleanEmail.substringBefore("@").lowercase().ifBlank { "grandmaster" }
@@ -252,33 +267,37 @@ class ChessRepository {
             cleanUsername.replaceFirstChar { it.uppercase() }
         }
         if (cleanEmail.isBlank() || password.length < 6) {
-            return Result.failure(
+            return@withContext Result.failure(
                 IllegalArgumentException("Please enter a valid email address and a password of at least 6 characters.")
             )
         }
 
         val client = supabaseClient
-            ?: return Result.failure(
+            ?: return@withContext Result.failure(
                 IllegalStateException(
-                    "Supabase is not connected yet. Paste your Supabase Project URL and Anon Key in the Connection section above (or in the AI Studio Secrets panel) and tap 'Connect & Test'."
+                    "Supabase is not connected yet. Paste your Supabase Project URL and Anon Key in the Connection section above (or in .env) and tap 'Connect & Test'."
                 )
             )
 
-        return try {
-            val signedUpInfo = client.auth.signUpWith(Email) {
-                this.email = cleanEmail
-                this.password = password
-                data = buildJsonObject {
-                    put("username", cleanUsername)
-                    put("display_name", cleanDisplayName)
+        try {
+            val signedUpInfo = withTimeout(15_000L) {
+                client.auth.signUpWith(Email) {
+                    this.email = cleanEmail
+                    this.password = password
+                    data = buildJsonObject {
+                        put("username", cleanUsername)
+                        put("display_name", cleanDisplayName)
+                    }
                 }
             }
             // If email confirmation is disabled, a session is active immediately; otherwise signIn or use signedUpInfo.id
             if (client.auth.currentSessionOrNull() == null) {
                 try {
-                    client.auth.signInWith(Email) {
-                        this.email = cleanEmail
-                        this.password = password
+                    withTimeout(10_000L) {
+                        client.auth.signInWith(Email) {
+                            this.email = cleanEmail
+                            this.password = password
+                        }
                     }
                 } catch (_: Exception) {
                     // Email confirmation may be required before session creation
@@ -294,7 +313,9 @@ class ChessRepository {
                 eloRating = 1200
             )
             try {
-                client.from("profiles").upsert(newProfile)
+                withTimeout(8_000L) {
+                    client.from("profiles").upsert(newProfile)
+                }
             } catch (_: Exception) {
                 // Trigger handle_new_user() may have already inserted the profile, or email confirmation is pending
             }
@@ -390,16 +411,20 @@ class ChessRepository {
         }
     }
 
-    suspend fun searchUsersByUsername(query: String): List<UserProfileDto> {
+    suspend fun searchUsersByUsername(query: String): List<UserProfileDto> = withContext(Dispatchers.IO) {
         val clean = query.trim().lowercase()
-        val client = supabaseClient
-        if (client != null && clean.isNotEmpty()) {
-            try {
-                val results = client.from("profiles").select {
-                    filter { ilike("username", "%$clean%") }
-                }.decodeList<UserProfileDto>()
-                if (results.isNotEmpty()) return results
-            } catch (_: Exception) {
+        if (clean.isNotEmpty()) {
+            val client = supabaseClient
+            if (client != null) {
+                try {
+                    val results = withTimeout(6_000L) {
+                        client.from("profiles").select {
+                            filter { ilike("username", "%$clean%") }
+                        }.decodeList<UserProfileDto>()
+                    }
+                    if (results.isNotEmpty()) return@withContext results
+                } catch (_: Exception) {
+                }
             }
         }
         val directory = listOf(
@@ -409,7 +434,7 @@ class ChessRepository {
             UserProfileDto("usr_liam", "liam_oconnor", "Liam O'Connor", "#EC4899", 1190, 15, 7),
             UserProfileDto("usr_nadia", "nadia_khoury", "Nadia Khoury", "#10B981", 1495, 51, 30)
         )
-        return if (clean.isEmpty()) directory else directory.filter {
+        if (clean.isEmpty()) directory else directory.filter {
             it.username.contains(clean, ignoreCase = true) ||
                 it.displayName.contains(clean, ignoreCase = true)
         }
